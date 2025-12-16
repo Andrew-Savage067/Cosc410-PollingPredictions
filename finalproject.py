@@ -13,7 +13,7 @@ from keras.optimizers import Adam
 import tensorflow as tf
 import math
 
-
+#gets input and output data from the files
 def get_data(filename):
     poll = pd.read_csv(filename)
     
@@ -55,6 +55,8 @@ def get_data(filename):
     #print(final.head(5))
     return final/100, results/100, lastpoll/100
 
+
+#initial simplified model that does not take time into account
 def decisiontrain():
     x = []
     y = []
@@ -79,7 +81,7 @@ def decisiontrain():
     print(f'Accuracy: {score}')
     return
 
-
+#creates and returns RNN model given number of recurrent layers and number of features
 def create_model(num_timesteps, features):
     
     inputs = ks.layers.Input(shape=(num_timesteps, features))
@@ -93,6 +95,8 @@ def create_model(num_timesteps, features):
     model.summary()
     return model
 
+
+#formats and splits the data for use in the RNN
 def RNNData(sample_number, finalResults):
     x = []
     yl = []
@@ -114,14 +118,15 @@ def RNNData(sample_number, finalResults):
     yl = np.array(yl)
     yr = np.array(yr)
     if finalResults:
-        y = yr
+        y = yr #results output
     else:
-        y = yl
+        y = yl #last poll output
     x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=10, shuffle = True)
     x_train, x_val, y_train, y_val = train_test_split(x_train, y_train, test_size=0.2, random_state=20, shuffle = True)
     return x_train, x_test, x_val, y_train, y_test, y_val
     
 
+#tests the model using the test data
 def test(model, x, y, finalResults):
     print("test results:")
     results = model.evaluate(x,y,20)
@@ -147,3 +152,41 @@ def test(model, x, y, finalResults):
         total+=1
     print(f'Percentage Error is {100*(error/total)}%')
     return
+
+
+
+#graphs the loss of valiudation data and trainintg data
+def graph_fit(history):
+    training = history.history["loss"]
+    validation = history.history["val_loss"]
+    epochs = range(len(training))
+    plt.figure()
+    plt.plot(epochs, training, "b", label="Training loss")
+    plt.plot(epochs, validation, "r", label="Validation loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.show()
+    
+
+
+
+def main():
+
+    finalResults = True #change this to switch between looking at results and lastpoll(true is results)
+    features = 5
+    sampleNumber = 10#number of polls looked at (number of recurrent layers)
+    numEpochs = 100
+    batchSize = 20
+    model = create_model(sampleNumber, features)
+    #decisiontrain()
+    x_train, x_test, x_val, y_train, y_test, y_val = RNNData(sampleNumber, finalResults)
+    print(x_train.shape)
+    x_train = torch.from_numpy(x_train)
+    y_train = torch.from_numpy(y_train)
+    history = model.fit(x_train, y_train, batch_size=batchSize, epochs=numEpochs, validation_data=(x_val, y_val))
+    graph_fit(history)
+    test(model, x_test, y_test, finalResults)
+
+
+main()
