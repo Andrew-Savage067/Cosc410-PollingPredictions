@@ -6,24 +6,56 @@ import glob
 import os
 from sklearn.model_selection import train_test_split
 import sklearn.tree
+import keras as ks
+import torch
+import matplotlib.pyplot as plt
+from keras.optimizers import Adam
+import tensorflow as tf
+import math
 
 
 def get_data(filename):
     poll = pd.read_csv(filename)
     
     poll = poll.drop(index=poll.index[0])
-    poll = poll.drop(columns=["Unnamed: 0","Sample", "Date", "Spread","Days_Out"], axis=1)
-    results = poll.head(1).drop(columns=["Poll"])
-    #poll = pd.get_dummies(poll, prefix = "Poll:", columns=["Poll"], drop_first=True, dtype=int)
+    poll = poll.drop(columns=["Unnamed: 0","Sample", "Date", "Spread"], axis=1)
     poll = poll.drop(columns=["Poll"])
     poll.replace("--",0.0,inplace=True)
-    results.replace("--",0.0,inplace=True)
     poll = poll.astype(float)
-    results = results.astype(float)
-    print(np.argmax(np.array(results)))
-    return poll.loc[0:41],np.argmax(np.array(results))
 
-def train():
+
+    #print(filename)
+    if filename == "Data\d_iowa_20.csv":
+        poll["Days_Out"] = poll["Days_Out"]+7
+
+    results = poll.head(1)
+    poll = poll.iloc[1:]
+    lastpoll = poll.head(1)
+    poll = poll.iloc[1:]
+    poll = poll.groupby(["Days_Out"]).mean()
+    #print(poll.head(10))
+
+
+    poll = poll.iloc[:,0:5]
+    results = results.iloc[:,0:5]
+    lastpoll = lastpoll.iloc[:,0:5]
+
+    poll.columns = range(len(poll.columns))
+    results.columns = range(len(results.columns))
+    lastpoll.columns = range(len(lastpoll.columns))
+
+    final = pd.DataFrame(0,index=poll.index,columns = [0,1,2,3,4])
+    fResults = pd.DataFrame(0,index=results.index,columns = [0,1,2,3,4])
+    fLastpoll = pd.DataFrame(0,index=lastpoll.index,columns = [0,1,2,3,4])
+    final = poll.combine_first(final)
+    results = results.combine_first(fResults)
+    lastpoll = lastpoll.combine_first(fLastpoll)
+    #print(results)
+    #print(lastpoll)
+    #print(final.head(5))
+    return final/100, results/100, lastpoll/100
+
+def decisiontrain():
     x = []
     y = []
     for filename in glob.glob(os.path.join("Data", "*csv")):
@@ -36,18 +68,82 @@ def train():
     for i, row in enumerate(x):
         newX[i, :len(row)] = row
 
-    print(np.array(newX))
-    X_train, X_test, y_train, y_test = train_test_split(newX,y, random_state=10, test_size=.2)
+    #print(np.array(newX))
+    X_train, X_test, y_train, y_test = train_test_split(newX,y, random_state=1, test_size=.4)
 
-    print(X_train)
+    #   print(X_train)
     dt = sklearn.tree.DecisionTreeClassifier(max_depth=2,random_state=1)
 
     clf_dt=dt.fit(X_train,y_train)
-    print(clf_dt.score(X_test,y_test))
+    score = clf_dt.score(X_test,y_test)
+    print(f'Accuracy: {score}')
     return
-def main():
-    train()
-    #test()
 
 
-main()
+def create_model(num_timesteps, features):
+    
+    inputs = ks.layers.Input(shape=(num_timesteps, features))
+    #model.add(ks.layers.Embedding(vocab_size, embedding_dim))
+    dense = ks.layers.Dense(15, activation="sigmoid")(inputs)
+    lstm = ks.layers.LSTM(10)(dense)
+    output = ks.layers.Dense(5, activation="sigmoid")(lstm)
+    model = ks.models.Model(inputs = inputs, outputs = output)
+    optimizer = Adam(learning_rate=.0001)
+    model.compile(loss="categorical_crossentropy", optimizer=optimizer)
+    model.summary()
+    return model
+
+def RNNData(sample_number, finalResults):
+    x = []
+    yl = []
+    yr = []
+    for filename in glob.glob(os.path.join("Data", "*csv")):
+        input, output, lastpoll = get_data(filename)
+        input = np.array(input)
+        #print(input.shape)
+        for row in range(len(input)-sample_number-1):
+            #print(input[row,:])
+            addon = input[row:row+sample_number,:]
+            #print(addon)
+            #print(np.fliplr(addon))
+            #print(indivTest.shape)
+            yl.append(np.array(lastpoll)[0])
+            yr.append(np.array(output)[0])
+            x.append(np.array(addon))
+    x = np.array(x)
+    yl = np.array(yl)
+    yr = np.array(yr)
+    if finalResults:
+        y = yr
+    else:
+        y = yl
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=10, shuffle = True)
+    x_train, x_val, y_train, y_val = train_test_split(x_train, y_train, test_size=0.2, random_state=20, shuffle = True)
+    return x_train, x_test, x_val, y_train, y_test, y_val
+    
+
+def test(model, x, y, finalResults):
+    print("test results:")
+    results = model.evaluate(x,y,20)
+    print(results)
+
+    #print(x[0])
+    print(tf.nn.softmax(model(np.array([x[0]]))))
+    print(y[0])
+
+    #accuracy
+    numCorrect = 0
+    total = 0
+    for test in range(len(x)):
+        if(np.argmax(tf.nn.softmax(model(np.array([x[test]])))) == np.argmax(y[test])):
+            numCorrect+=1
+        total+=1
+    print(f'Accuracy is {100*(numCorrect/total)}%')
+
+    #percentage error
+    error = 0
+    for test in range(len(x)):
+        error += abs(np.max(tf.nn.softmax(model(np.array([x[test]])))) - np.max(y[test]))
+        total+=1
+    print(f'Percentage Error is {100*(error/total)}%')
+    return
